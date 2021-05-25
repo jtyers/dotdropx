@@ -77,23 +77,68 @@ findFile() {
     || die "could not find $input"
 }
 
+# usage: findFileOrParent <target file>
 findFileOrParent() {
+  # don't recurse beyond these directories
+  stopAt=( "/etc" "$HOME" )
+  stopIfContains=( ".git" )
+
   target="$1"
+  targetBase=$(basename "$target")
+  targetRel=""  # if return value is not same as target, this 
+                # denotes the path from return val to target
 
   result=$(findFile "$target" 2>/dev/null || true)
 
   if [ -n "$result" ]; then
+    # echo result but without $targetRel
+    result=$(jq -re --arg path "$target" '. * { path: $path }' <<<"$result")
+
     echo "$result"
     return
   fi
 
-  targetParent=$(dirname "$target")
-  result=$(findFile "$targetParent" 2>/dev/null | jq -re '. * { parent: true }')
+  # now jump up to the parent directory, unless our directory is
+  # in $stopAt or contains any of $stopIfContains
+  while true; do
+    if [ -z "$targetRel" ]; then
+      targetRel=$(basename "$target")  # avoid trailing slashes on $targetRel
+    else
+      targetRel=$(basename "$target")/"$targetRel"
+    fi
 
-  if [ -n "$result" ]; then
-    echo "$result"
-    return
-  fi
+    target=$(dirname "$target")
+    result=$(findFile "$target" 2>/dev/null || true)
+
+    if [ -n "$result" ]; then
+      # echo result, adding in $targetRel so the caller knows that
+      # their target is beneath the return value's src/dst path
+      result=$(jq -re \
+        --arg path "$target" \
+        --arg targetRel "$targetRel" \
+        '. * { $path, $targetRel }' <<<"$result"
+      )
+      echo "$result"
+      return
+    fi
+
+    doBreak=0
+    if [ $target == / ]; then
+      doBreak=1
+    else
+      for _stopAt in ${stopAt[@]}; do
+        [ "$target" == "$_stopAt" ] && doBreak=1
+      done
+
+      if [ $doBreak -eq 0 ]; then
+        for _stopIfContains in ${stopIfContains[@]}; do
+          [ -e "$target/$_stopIfContains" ] && doBreak=1
+        done
+      fi
+    fi
+
+    [ $doBreak -eq 1 ] && break
+  done
 
   return 1  # failed
 }
@@ -105,11 +150,12 @@ editFiles() {
   dst=$(jq -r .dst <<<"$ff")
   dst="${dst/\~/$HOME}"
 
-  parent=$(jq -r .parent <<<"$ff")
+  targetRel=$(jq -r '.targetRel | if . != null then . else "" end' <<<"$ff" || true)
 
-  if [ "$parent" == "true" ]; then
-    src="dotfiles/$src/$(basename $1)"
-    dst="$dst/$(basename $1)"
+  if [ -n "$targetRel" ]; then
+    src="dotfiles/$src/$targetRel"
+    dst="$dst/$targetRel"
+
   else
     src="dotfiles/$src"
   fi
