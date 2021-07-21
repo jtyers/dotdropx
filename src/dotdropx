@@ -199,7 +199,7 @@ while true; do
         -c|--cfg)	        cfg_file="$2";          shift; shift ;;
         --sudo)	          do_sudo=1;              shift ;;
         --)	                                      shift; break ;;
-        *)			          die "$1 unknown, usage: $usage" ;;
+        *)	                                      break ;;  # do not shift
     esac
 done
 
@@ -211,7 +211,7 @@ while true; do
         f|find)	          do_find="$2";           shift; shift ;;
         s|src)	          do_print_src="$2";      shift; shift ;;
         g|git)	          do_git=1;               shift; break ;;  # $@ gets passed to git
-        sudo)	            do_sudo=1;              shift ;;
+        --)			                                  shift; break ;;
         *)			          die "$1 unknown, usage: $usage" ;;
     esac
 done
