@@ -204,6 +204,8 @@ while true; do
 done
 
 while true; do
+    [ $# -eq 0 ] && break
+
     case "$1" in
         C|compare)	      do_compare=1;           shift ;;
         d|difftool)	      do_difftool="$2";       shift; shift ;;
@@ -212,7 +214,7 @@ while true; do
         s|src)	          do_print_src="$2";      shift; shift ;;
         g|git)	          do_git=1;               shift; break ;;  # $@ gets passed to git
         --)			                                  shift; break ;;
-        *)			          die "$1 unknown, usage: $usage" ;;
+        *)			          die "'$1' unknown, usage: $usage" ;;
     esac
 done
 
