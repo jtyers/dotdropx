@@ -24,7 +24,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-usage="$(basename $0) [compare|difftool <file>|difftool-all|find <file>|git <command...>]"
+usage="$(basename $0) [--cfg=<file>] [--sudo] [compare|difftool <file>|difftool-all|find <file>|git <command...>]"
 
 set -eu
 
@@ -185,20 +185,25 @@ dotdrop="dotdrop"
 
 [ $# -ge 1 ] || die "$usage"
 
+# the + at the start of the short-options string tells getopt to stop
+# parsing at the first non-option argument, which allows us for example
+# to do `dotdropx git status --short` without getopt greedily consuming
+# the '--short' and erroring out
+O=`getopt -n dotdropx \
+    -l sudo:,cfg: \
+    -- +c: "$@"` \
+    || die "$usage"
+eval set -- "$O"
 while true; do
-  if [ "${1:0:2}" == "-c" ]; then
-    cfg_file="$2"
-    shift; shift
-  
-  elif [ "${1:0:6}" == "--cfg=" ]; then
-    cfg_file="${1:6}"
-    shift
-  
-  elif [ "${1:0:5}" == "--cfg" ]; then
-    cfg_file="$2"
-    shift; shift
-  fi
+    case "$1" in
+        -c|--cfg)	        cfg_file="$2";          shift; shift ;;
+        --sudo)	          do_sudo=1;              shift ;;
+        --)	                                      shift; break ;;
+        *)			          die "$1 unknown, usage: $usage" ;;
+    esac
+done
 
+while true; do
     case "$1" in
         C|compare)	      do_compare=1;           shift ;;
         d|difftool)	      do_difftool="$2";       shift; shift ;;
