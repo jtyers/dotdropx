@@ -24,7 +24,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-usage="$(basename $0) [--compare|--difftool <file>|--difftool-all|--find <file>]"
+usage="$(basename $0) [--cfg=<file>] [--sudo] [compare|difftool <file>|difftool-all|find <file>|git <command...>]"
 
 set -eu
 
@@ -73,7 +73,7 @@ findFile() {
             end
           | .value * {key}
         end
-      ' config.yaml \
+      ' ${cfg_file:-config.yaml} \
     || die "could not find $input"
 }
 
@@ -153,14 +153,21 @@ editFiles() {
   targetRel=$(jq -r '.targetRel | if . != null then . else "" end' <<<"$ff" || true)
 
   if [ -n "$targetRel" ]; then
-    src="dotfiles/$src/$targetRel"
+    src="$cfg_dir/dotfiles/$src/$targetRel"
     dst="$dst/$targetRel"
 
   else
-    src="dotfiles/$src"
+    src="$cfg_dir/dotfiles/$src"
   fi
 
-  nvim +":windo diffthis" -o "$src" "$dst"
+  edit_cmd='${EDITOR:-nvim} +":windo diffthis" -o "$src" "$dst"'
+  if [ $do_sudo -eq 1 ]; then
+    # we would use sudoedit but we really want the difftool, not just a simple editor
+    eval sudo $edit_cmd
+
+  else
+    eval $edit_cmd
+  fi
 
 }
 
@@ -169,50 +176,94 @@ do_compare=0
 do_difftool=""
 do_difftool_all=0
 do_print_src=""
+do_sudo=0
+do_git=0
 do_find=""
+cfg_file=""
+cfg_dir="."
+dotdrop="dotdrop"
 
 [ $# -ge 1 ] || die "$usage"
 
+# the + at the start of the short-options string tells getopt to stop
+# parsing at the first non-option argument, which allows us for example
+# to do `dotdropx git status --short` without getopt greedily consuming
+# the '--short' and erroring out
 O=`getopt -n dotdropx \
-    -l compare,difftool:,difftool-all,find:,src: \
-    -- cd:Df:s: "$@"` \
+    -l sudo:,cfg: \
+    -- +c: "$@"` \
     || die "$usage"
 eval set -- "$O"
 while true; do
     case "$1" in
-        -c|--compare)	      do_compare=1;           shift ;;
-        -d|--difftool)	    do_difftool="$2";       shift; shift ;;
-        -D|--difftool-all)	do_difftool_all=1;      shift ;;
-        -f|--find)	        do_find="$2";           shift; shift ;;
-        -s|--src)	          do_print_src="$2";      shift; shift ;;
-        --)			                                    shift; break ;;
-        *)			            die "$usage" ;;
+        -c|--cfg)	        cfg_file="$2";          shift; shift ;;
+        --sudo)	          do_sudo=1;              shift ;;
+        --)	                                      shift; break ;;
+        *)	                                      break ;;  # do not shift
     esac
 done
 
-[ $# -eq 0 ] || die "$usage"
+while true; do
+    [ $# -eq 0 ] && break
 
-if [ "$do_compare" -eq 1 ]; then
-    dotdrop compare "$@" 2>&1 | grep -Ev '^=> compare '
+    case "$1" in
+        C|compare)	      do_compare=1;           shift ;;
+        d|difftool)	      do_difftool="$2";       shift; shift ;;
+        D|difftool-all)	  do_difftool_all=1;      shift ;;
+        f|find)	          do_find="$2";           shift; shift ;;
+        s|src)	          do_print_src="$2";      shift; shift ;;
+        g|git)	          do_git=1;               shift; break ;;  # $@ gets passed to git
+        --)			                                  shift; break ;;
+        *)			          die "'$1' unknown, usage: $usage" ;;
+    esac
+done
+
+if [ $do_git -ne 1 ]; then
+  [ $# -eq 0 ] || die "$usage"
+fi
+
+[ $do_sudo -eq 1 ] && dotdrop="sudo dotdrop"
+
+args=""
+gitargs=""
+
+if [ -n "$cfg_file" ]; then
+  cfg_dir=$(dirname $cfg_file)
+  args="$args --cfg=$cfg_file"
+  gitargs="$gitargs -C $cfg_dir"
+fi
+
+if [ "$do_git" -eq 1 ]; then
+  [ "$do_compare" -eq 1 ] && die "cannot use --git with other arguments"
+  [ "$do_sudo" -eq 1 ] && die "cannot use --git with other arguments"
+  [ -n "$do_difftool" ] && die "cannot use --git with other arguments"
+  [ "$do_difftool_all" -eq 1 ] && die "cannot use --git with other arguments"
+  [ -n "$do_print_src" ] && die "cannot use --git with other arguments"
+  [ -n "$do_find" ] && die "cannot use --git with other arguments"
+
+  git $gitargs "$@"
+
+elif [ "$do_compare" -eq 1 ]; then
+  $dotdrop compare $args "$@" 2>&1 | grep -Ev '^=> compare '
 
 elif [ -n "$do_difftool" ]; then
   editFiles "$do_difftool"
 
 elif [ "$do_difftool_all" -eq 1 ]; then
   any=0
-  for f in $(dotdrop compare 2>&1 | awk '/^\-\-\-/{ print $2 }'); do
+  for f in $($dotdrop compare $args 2>&1 | awk '/^\-\-\-/{ print $2 }'); do
     any=1
     editFiles "$f"
   done
 
   [ $any -eq 0 ] && echo "no files differ"
 
-  if [ -n "$(git status --porcelain)" ]; then
+  if [ -n "$(git $gitargs status --porcelain)" ]; then
     if askYN "commit changes?"; then
-      git commit -av
+      git $gitargs commit -av
 
-      if [ -n "$(git remote)" ] && askYN "push?"; then
-        git push
+      if [ -n "$(git $gitargs remote)" ] && askYN "push?"; then
+        git $gitargs push
       fi
     fi
   fi
@@ -228,8 +279,8 @@ elif [ -n "$do_print_src" ]; then
 
   case "$do_print_src" in
     "$src") echo $(readlink -f "$dst") ;;
-    "$dst") echo $(readlink -f "dotfiles/$src") ;;
-    "$key") echo $(readlink -f "dotfiles/$src") ;;
+    "$dst") echo $(readlink -f "$cfg_dir/dotfiles/$src") ;;
+    "$key") echo $(readlink -f "$cfg_dir/dotfiles/$src") ;;
     *) die "?!" ;;
   esac
 
