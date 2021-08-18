@@ -185,6 +185,8 @@ dotdrop="dotdrop"
 
 [ $# -ge 1 ] || die "$usage"
 
+[ -x /usr/bin/yq ] || die "yq not installed"
+
 # the + at the start of the short-options string tells getopt to stop
 # parsing at the first non-option argument, which allows us for example
 # to do `dotdropx git status --short` without getopt greedily consuming
