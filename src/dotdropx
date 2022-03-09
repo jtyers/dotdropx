@@ -262,7 +262,7 @@ elif [ "$do_difftool_all" -eq 1 ]; then
 
   if [ -n "$(git $gitargs status --porcelain)" ]; then
     if askYN "commit changes?"; then
-      git $gitargs commit -av
+      git $gitargs commit -av -m updates
 
       if [ -n "$(git $gitargs remote)" ] && askYN "push?"; then
         git $gitargs push
